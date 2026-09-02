@@ -9,6 +9,7 @@ import pytest
 from r3_cli import CliError
 from r3translate.bundle import apply_bundle, atomic_write, create_bundle, read_bundle, write_bundle
 from r3translate.checks import check_document
+from r3translate.markdown import segment_document
 from r3translate.profile import load_profile
 
 
@@ -150,3 +151,10 @@ def test_structural_check_detects_changed_link(fixture) -> None:
     changed = original.replace("https://example.com/a", "https://example.com/b")
     findings = check_document(changed, profile, source_text=original)
     assert any(item.code == "R3Translate.Structure.Protected" for item in findings)
+
+
+def test_frontmatter_lists_translate_but_math_and_indented_code_do_not(fixture) -> None:
+    _, _, profile = fixture
+    text = "---\naliases:\n  - Nombre visible\nstatus: activo\n---\n$$\nformula words\n$$\n\n    código indentado\n"
+    bundle_source = [segment.source for segment in segment_document(text, profile)]
+    assert bundle_source == ["Nombre visible"]

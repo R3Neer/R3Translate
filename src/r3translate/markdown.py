@@ -135,9 +135,35 @@ def segment_document(text: str, profile: Profile) -> tuple[Segment, ...]:
     fence_char = ""
     frontmatter = text.startswith("---\n") or text.startswith("---\r\n")
     in_frontmatter = frontmatter
+    frontmatter_key: str | None = None
+    in_math_block = False
+    in_html_block: str | None = None
     for line_number, line_with_end in enumerate(text.splitlines(keepends=True), 1):
         line = line_with_end.rstrip("\r\n")
-        newline_size = len(line_with_end) - len(line)
+        stripped = line.strip()
+        if in_math_block:
+            if stripped in {"$$", r"\]"}:
+                in_math_block = False
+            offset += len(line_with_end)
+            continue
+        if stripped in {"$$", r"\["}:
+            in_math_block = True
+            offset += len(line_with_end)
+            continue
+        if in_html_block:
+            if re.search(rf"</{re.escape(in_html_block)}\s*>", line, re.IGNORECASE) or (in_html_block == "!--" and "-->" in line):
+                in_html_block = None
+            offset += len(line_with_end)
+            continue
+        html_open = re.match(r"\s*<(script|style|pre|table)\b", line, re.IGNORECASE)
+        if html_open and not re.search(rf"</{html_open.group(1)}\s*>", line, re.IGNORECASE):
+            in_html_block = html_open.group(1)
+            offset += len(line_with_end)
+            continue
+        if stripped.startswith("<!--") and "-->" not in stripped:
+            in_html_block = "!--"
+            offset += len(line_with_end)
+            continue
         fence = FENCE_RE.match(line)
         if fence:
             marker = fence.group(1)[0]
@@ -148,6 +174,9 @@ def segment_document(text: str, profile: Profile) -> tuple[Segment, ...]:
             offset += len(line_with_end)
             continue
         if in_fence:
+            offset += len(line_with_end)
+            continue
+        if not in_frontmatter and (line.startswith("    ") or line.startswith("\t")):
             offset += len(line_with_end)
             continue
         context = "body"
@@ -162,12 +191,22 @@ def segment_document(text: str, profile: Profile) -> tuple[Segment, ...]:
                 offset += len(line_with_end)
                 continue
             match = FRONTMATTER_RE.match(line)
-            if not match or match.group(1) not in profile.translate_frontmatter:
-                offset += len(line_with_end)
-                continue
-            start_in_line = match.start(3)
-            source = match.group(3)
-            context = f"frontmatter:{match.group(1)}"
+            if match:
+                frontmatter_key = match.group(1)
+                if frontmatter_key not in profile.translate_frontmatter:
+                    offset += len(line_with_end)
+                    continue
+                start_in_line = match.start(3)
+                source = match.group(3)
+                context = f"frontmatter:{frontmatter_key}"
+            else:
+                list_item = re.match(r"^(\s*-\s+)(.*)$", line)
+                if not list_item or frontmatter_key not in profile.translate_frontmatter:
+                    offset += len(line_with_end)
+                    continue
+                start_in_line = list_item.start(2)
+                source = list_item.group(2)
+                context = f"frontmatter:{frontmatter_key}"
         if not source.strip() or not WORD_RE.search(source):
             offset += len(line_with_end)
             continue
@@ -192,4 +231,3 @@ def restore_translation(value: str, protections: list[dict[str, str]]) -> str:
     if re.search(r"__R3P_\d{4}__", restored):
         raise ValueError("unknown protection marker remains")
     return restored
-

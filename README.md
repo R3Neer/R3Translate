@@ -48,7 +48,7 @@ the original and profile and are rejected when either input has changed.
 ## DeepL
 
 ```console
-pipx install "r3translate[deepl] @ git+https://github.com/R3Neer/R3Translate.git@v0.1.0"
+pipx install "r3translate[deepl] @ git+https://github.com/R3Neer/R3Translate.git@v0.1.1"
 set DEEPL_AUTH_KEY=...
 r3translate translate document.md --profile es-en.toml --provider deepl --output document.en.md
 ```
