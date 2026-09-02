@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+dist/
+build/
+*.egg-info/
+*.r3translate.json
