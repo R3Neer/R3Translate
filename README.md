@@ -27,6 +27,9 @@ preserve = ["status", "decisions", "questions"]
 
 [style]
 forbidden = ["behavior", "color"]
+
+[checks]
+probable-source = ["para", "pero", "también"]
 ```
 
 ## Offline exchange
@@ -64,4 +67,3 @@ only from `DEEPL_AUTH_KEY`; R3Translate does not create remote glossaries.
 ## Licence
 
 MIT. See [`LICENSE`](LICENSE).
-

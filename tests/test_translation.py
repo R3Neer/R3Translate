@@ -36,6 +36,9 @@ preserve = ["status", "decisions"]
 
 [style]
 forbidden = ["behavior", "color"]
+
+[checks]
+probable-source = ["para"]
 '''.lstrip()
 
 
@@ -120,10 +123,18 @@ def test_check_reports_british_spelling_and_review_term(fixture) -> None:
     ]
 
 
+def test_check_reports_source_residue_and_unresolved_marker(fixture) -> None:
+    _, _, profile = fixture
+    findings = check_document("Text para review __R3P_0001__.", profile)
+    assert {item.code for item in findings} == {
+        "R3Translate.Language.SourceResidue",
+        "R3Translate.Structure.Marker",
+    }
+
+
 def test_structural_check_detects_changed_link(fixture) -> None:
     source, _, profile = fixture
     original = source.read_text(encoding="utf-8")
     changed = original.replace("https://example.com/a", "https://example.com/b")
     findings = check_document(changed, profile, source_text=original)
     assert any(item.code == "R3Translate.Structure.Protected" for item in findings)
-

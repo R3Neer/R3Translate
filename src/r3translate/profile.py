@@ -30,6 +30,7 @@ class Profile:
     translate_frontmatter: tuple[str, ...]
     preserve_frontmatter: tuple[str, ...]
     forbidden_spellings: tuple[str, ...]
+    probable_source: tuple[str, ...]
     extensions: dict[str, Any]
 
     @property
@@ -78,6 +79,7 @@ def load_profile(path: Path) -> Profile:
     protected = data.get("protected", {})
     frontmatter = data.get("frontmatter", {})
     style = data.get("style", {})
+    checks = data.get("checks", {})
     patterns = _strings(protected.get("patterns"), "protected.patterns")
     for pattern in patterns:
         try:
@@ -95,6 +97,6 @@ def load_profile(path: Path) -> Profile:
         translate_frontmatter=_strings(frontmatter.get("translate"), "frontmatter.translate"),
         preserve_frontmatter=_strings(frontmatter.get("preserve"), "frontmatter.preserve"),
         forbidden_spellings=_strings(style.get("forbidden"), "style.forbidden"),
+        probable_source=_strings(checks.get("probable-source"), "checks.probable-source"),
         extensions=dict(data.get("markdown", {})),
     )
-
