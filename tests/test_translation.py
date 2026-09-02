@@ -132,6 +132,18 @@ def test_check_reports_source_residue_and_unresolved_marker(fixture) -> None:
     }
 
 
+def test_check_reports_unapplied_required_term(fixture) -> None:
+    _, _, profile = fixture
+    findings = check_document("Una regla pendiente.", profile)
+    assert any(item.code == "R3Translate.Term.Required" for item in findings)
+
+
+def test_check_ignores_protected_destinations_and_code(fixture) -> None:
+    _, _, profile = fixture
+    findings = check_document("[Label](docs/regla.md) and `regla behavior`.\n", profile)
+    assert findings == []
+
+
 def test_structural_check_detects_changed_link(fixture) -> None:
     source, _, profile = fixture
     original = source.read_text(encoding="utf-8")
