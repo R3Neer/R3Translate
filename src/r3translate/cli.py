@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from r3_cli import CliError, ConsoleUI, add_output_arguments
+from r3_cli import CliError, ConsoleUI, R3ArgumentParser, add_output_arguments
 
 from . import __version__
 from .bundle import apply_bundle, atomic_write, create_bundle, read_bundle, read_utf8, write_bundle
@@ -36,11 +36,11 @@ def _emit(ui: ConsoleUI, fmt: str, value: dict[str, Any], message: str) -> None:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="r3translate")
+    root = R3ArgumentParser(prog="r3translate")
     root.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     root.add_argument("--format", choices=("text", "json"), default="text")
     add_output_arguments(root)
-    commands = root.add_subparsers(dest="command", required=True)
+    commands = root.add_subparsers(dest="command", required=True, parser_class=R3ArgumentParser)
     plan = commands.add_parser("plan", help="Analyse a document without writing.")
     plan.add_argument("input", type=Path)
     plan.add_argument("--profile", required=True, type=Path)

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from r3translate.cli import main
 
 
@@ -19,6 +21,28 @@ def test_plan_json_has_no_ansi(tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
     assert json.loads(output)["segments"] == 1
     assert "\x1b[" not in output
+
+
+def test_help_is_separated_from_the_shell_prompt(capsys) -> None:
+    with pytest.raises(SystemExit, match="0"):
+        main(["--help"])
+    output = capsys.readouterr().out
+    assert output.startswith("\nusage: r3translate ")
+    assert output.endswith("\n\n")
+
+
+def test_command_help_is_separated_from_the_shell_prompt(capsys) -> None:
+    with pytest.raises(SystemExit, match="0"):
+        main(["plan", "--help"])
+    output = capsys.readouterr().out
+    assert output.startswith("\nusage: r3translate plan ")
+    assert output.endswith("\n\n")
+
+
+def test_version_remains_a_single_line(capsys) -> None:
+    with pytest.raises(SystemExit, match="0"):
+        main(["--version"])
+    assert capsys.readouterr().out == "r3translate 0.1.2\n"
 
 
 def test_extract_and_apply_offline(tmp_path: Path) -> None:
