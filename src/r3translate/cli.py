@@ -22,6 +22,7 @@ from r3_cli import (
 from . import __version__
 from .bundle import apply_bundle, atomic_write, create_bundle, read_bundle, read_utf8, write_bundle
 from .checks import check_document
+from .markdown import rebuild_translation_fragments, split_translation_fragments
 from .profile import load_profile
 from .providers import available_providers, deepl_usage, translate_deepl
 
@@ -123,9 +124,9 @@ def help_catalogue() -> HelpCatalogue:
             CommandHelp("plan", "TRANSLATION", "Analyse Markdown without writing", "Analyse one Markdown document or a directory tree and estimate the characters prepared for DeepL without creating files.", (f"{invocation} plan INPUT --profile PROFILE [--quota CHARACTERS | --live-usage]",), (
                 HelpItem("INPUT", "Markdown source document, or directory to scan recursively for .md files. Hidden directories are ignored."),
                 HelpItem("--profile PROFILE", "TOML translation contract that defines languages, terminology and protections."),
-                HelpItem("--quota CHARACTERS", "Local character budget to compare with the prepared DeepL request. Does not use the network."),
+                HelpItem("--quota CHARACTERS", "Local character budget to compare with the actual DeepL request. Does not use the network."),
                 HelpItem("--live-usage", "Query the current DeepL character quota through DEEPL_AUTH_KEY. Sends no Markdown content."),
-            ), notes=("By default this command is fully offline. Prepared characters include opaque protection markers, so they estimate the text sent to DeepL.",), examples=(f"{invocation} plan document.md --profile es-en.toml --quota 1000000", f"{invocation} plan notes --profile es-en.toml --live-usage")),
+            ), notes=("By default this command is fully offline. Prepared characters include local markers; DeepL request characters count only the linguistic fragments sent to the provider.",), examples=(f"{invocation} plan document.md --profile es-en.toml --quota 1000000", f"{invocation} plan notes --profile es-en.toml --live-usage")),
             CommandHelp("extract", "TRANSLATION", "Create an offline JSON exchange bundle", "Extract verified translation segments into a JSON bundle for an external translator.", (f"{invocation} extract INPUT --profile PROFILE --output OUTPUT [--force]",), (
                 HelpItem("INPUT", "Markdown source document to extract."),
                 HelpItem("--profile PROFILE", "TOML translation contract used to protect structure and terminology."),
@@ -145,7 +146,7 @@ def help_catalogue() -> HelpCatalogue:
                 HelpItem("--provider deepl", "Use DeepL. Requires DEEPL_AUTH_KEY and is the only command that uses the network."),
                 HelpItem("--output OUTPUT", "New candidate path, or - to write candidate bytes to standard output."),
                 HelpItem("--force", "Replace an existing output file. Without it, existing files are preserved."),
-            ), notes=("DEEPL_AUTH_KEY is read only from the environment and is never written to a bundle or error message.",), examples=(f"{invocation} translate document.md --profile es-en.toml --provider deepl --output document.en.md",)),
+            ), notes=("Only linguistic fragments are sent to DeepL; protected Markdown, paths, links, identifiers and their markers remain local. DEEPL_AUTH_KEY is read only from the environment and is never written to a bundle or error message.",), examples=(f"{invocation} translate document.md --profile es-en.toml --provider deepl --output document.en.md",)),
             CommandHelp("check", "TRANSLATION", "Check terminology and protected structure", "Check a candidate for terminology, protected-marker and configured-language findings without changing files.", (f"{invocation} check INPUT --profile PROFILE [--source SOURCE]",), (
                 HelpItem("INPUT", "Translated Markdown candidate to inspect."),
                 HelpItem("--profile PROFILE", "TOML translation contract containing required terms and style checks."),
@@ -183,12 +184,18 @@ def _plan_value(input_path: Path, profile: Any, *, quota: int | None, live_usage
         segments = bundle["segments"]
         protected = sum(len(protection["source"]) for segment in segments for protection in segment["protections"])
         prepared = sum(len(segment["prepared"]) for segment in segments)
+        deepl_request = sum(
+            len(parts[index])
+            for segment in segments
+            for parts, indexes in [split_translation_fragments(segment["prepared"], segment["protections"])]
+            for index in indexes
+        )
         entries.append({
             "path": path.relative_to(input_path).as_posix() if directory else path.name,
             "source_chars": len(text),
             "protected_chars": protected,
             "prepared_chars": prepared,
-            "deepl_request_chars": prepared,
+            "deepl_request_chars": deepl_request,
             "segments": len(segments),
         })
         source_texts.append(text)
@@ -235,6 +242,7 @@ def _emit_plan(ui: ConsoleUI, fmt: str, value: dict[str, Any]) -> None:
         ("Markdown files", value["markdown_files"]),
         ("Source characters", value["source_chars"]),
         ("Characters protected", value["protected_chars"]),
+        ("Prepared characters", value["prepared_chars"]),
         ("DeepL request chars", value["deepl_request_chars"]),
     )
     for label, number in rows:
@@ -281,14 +289,23 @@ def run(arguments: argparse.Namespace, ui: ConsoleUI) -> int:
         return 0
     if arguments.command == "translate":
         ui.step(f"Translating {len(bundle['segments'])} segments with {arguments.provider}.")
-        prepared = [item["prepared"] for item in bundle["segments"]]
-        translations = translate_deepl(prepared, source=profile.source_language, target=profile.target_language)
-        for item, translation in zip(bundle["segments"], translations, strict=True):
-            item["translation"] = translation
+        plans: list[tuple[list[str], list[int], int, int]] = []
+        fragments: list[str] = []
+        for item in bundle["segments"]:
+            try:
+                parts, translatable = split_translation_fragments(item["prepared"], item.get("protections", []))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise CliError(f"Segment '{item.get('id', '?')}' has invalid protected structure.", code="R3Translate.Translate.Protection", details=str(exc), hint="extract the document again", exit_code=4) from exc
+            start = len(fragments)
+            fragments.extend(parts[index] for index in translatable)
+            plans.append((parts, translatable, start, len(fragments)))
+        translations = translate_deepl(fragments, source=profile.source_language, target=profile.target_language) if fragments else []
+        for item, (parts, translatable, start, end) in zip(bundle["segments"], plans, strict=True):
+            item["translation"] = rebuild_translation_fragments(parts, translatable, translations[start:end])
         candidate = apply_bundle(arguments.input, profile, bundle)
         _write_bytes(candidate, arguments.output, force=arguments.force)
         if arguments.output != "-":
-            _emit(ui, arguments.format, {"output": arguments.output, "segments": len(translations)}, f"Translated {len(translations)} segments to {arguments.output}.")
+            _emit(ui, arguments.format, {"output": arguments.output, "segments": len(bundle["segments"]), "fragments": len(translations)}, f"Translated {len(bundle['segments'])} segments ({len(translations)} fragments) to {arguments.output}.")
         return 0
     raw, text, _ = read_utf8(arguments.input)
     del raw

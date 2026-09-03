@@ -9,7 +9,7 @@ import pytest
 from r3_cli import CliError
 from r3translate.bundle import apply_bundle, atomic_write, create_bundle, read_bundle, write_bundle
 from r3translate.checks import check_document
-from r3translate.markdown import segment_document
+from r3translate.markdown import rebuild_translation_fragments, segment_document, split_translation_fragments
 from r3translate.profile import load_profile
 
 
@@ -78,6 +78,29 @@ def test_apply_changes_only_segments_and_restores_protections(fixture) -> None:
     assert b"\r\n" in apply_bundle(source, profile, bundle)
 
 
+def test_fragment_plan_keeps_protections_out_of_provider_text(fixture) -> None:
+    source, _, profile = fixture
+    segment = next(item for item in create_bundle(source, profile)["segments"] if "`código`" in item["source"])
+    parts, indexes = split_translation_fragments(segment["prepared"], segment["protections"])
+    provider_text = [parts[index] for index in indexes]
+    assert all(item["source"] not in "".join(provider_text) for item in segment["protections"])
+    assert all("[[R3P" not in value for value in provider_text)
+    rebuilt = rebuild_translation_fragments(parts, indexes, [value.replace("Texto", "Text") for value in provider_text])
+    assert all(item["token"] in rebuilt for item in segment["protections"])
+
+
+def test_protected_only_line_does_not_create_a_segment(fixture) -> None:
+    _, _, profile = fixture
+    assert segment_document("`code only`\n", profile) == ()
+
+
+def test_quoted_frontmatter_edges_are_protected(fixture) -> None:
+    source, _, profile = fixture
+    source.write_text('---\ntitle: "Un título"\n---\nTexto.\n', encoding="utf-8")
+    segment = next(item for item in create_bundle(source, profile)["segments"] if item["protections"])
+    assert [item["kind"] for item in segment["protections"]].count("frontmatter-quote") == 2
+
+
 def test_lost_marker_is_unsafe(fixture) -> None:
     source, _, profile = fixture
     bundle = create_bundle(source, profile)
@@ -126,7 +149,7 @@ def test_check_reports_british_spelling_and_review_term(fixture) -> None:
 
 def test_check_reports_source_residue_and_unresolved_marker(fixture) -> None:
     _, _, profile = fixture
-    findings = check_document("Text para review __R3P_0001__.", profile)
+    findings = check_document("Text para review [[R3P0001R]].", profile)
     assert {item.code for item in findings} == {
         "R3Translate.Language.SourceResidue",
         "R3Translate.Structure.Marker",

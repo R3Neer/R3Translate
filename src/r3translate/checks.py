@@ -26,11 +26,11 @@ def _line(text: str, offset: int) -> int:
 
 def check_document(text: str, profile: Profile, *, source_text: str | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for match in re.finditer(r"__R3P_\d{4}__", text):
+    for match in re.finditer(r"(?:__R3P_\d{4}__|\[\[R3P\d{4}R\]\])", text):
         findings.append(Finding("R3Translate.Structure.Marker", f"Unresolved protection marker '{match.group(0)}'.", _line(text, match.start())))
     candidate_segments = segment_document(text, profile)
     for segment in candidate_segments:
-        visible = re.sub(r"__R3P_\d{4}__", " ", segment.prepared)
+        visible = re.sub(r"(?:__R3P_\d{4}__|\[\[R3P\d{4}R\]\])", " ", segment.prepared)
         for spelling in profile.forbidden_spellings:
             for match in re.finditer(rf"(?<!\w){re.escape(spelling)}(?!\w)", visible, re.IGNORECASE):
                 findings.append(Finding("R3Translate.Style.Forbidden", f"Forbidden spelling '{match.group(0)}'.", segment.line))
@@ -45,8 +45,26 @@ def check_document(text: str, profile: Profile, *, source_text: str | None = Non
                 findings.append(Finding("R3Translate.Language.SourceResidue", f"Probable {profile.source_language} residue '{match.group(0)}'.", segment.line))
     if source_text is not None:
         source_segments = segment_document(source_text, profile)
-        source_protected = [(protection.source, protection.kind) for segment in source_segments for protection in segment.protections if protection.kind != "required-term"]
-        candidate_protected = [(protection.source, protection.kind) for segment in candidate_segments for protection in segment.protections if protection.kind != "required-term"]
+        structural_kinds = {
+            "inline-code", "math", "html", "url", "path", "embed", "markdown-link-delimiter",
+            "markdown-link-target", "wikilink-target", "wikilink-delimiter", "markdown-prefix", "callout",
+            "table-separator", "table-delimiter", "profile-pattern", "markdown-delimiter", "frontmatter-quote",
+        }
+
+        def structural_signature(segments):
+            signature = []
+            for segment in segments:
+                for protection in segment.protections:
+                    if protection.kind not in structural_kinds:
+                        continue
+                    value = protection.source
+                    if protection.kind == "markdown-prefix":
+                        value = re.sub(r"\s+", " ", value)
+                    signature.append((value, protection.kind))
+            return signature
+
+        source_protected = structural_signature(source_segments)
+        candidate_protected = structural_signature(candidate_segments)
         if source_protected != candidate_protected:
             findings.append(Finding("R3Translate.Structure.Protected", "Protected Markdown, links, paths or identifiers changed."))
     return findings

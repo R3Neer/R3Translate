@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import r3translate.cli as cli_module
 from r3translate.cli import main
 
 
@@ -27,7 +28,7 @@ def test_help_is_separated_from_the_shell_prompt(capsys) -> None:
     assert main(["--help"]) == 0
     output = capsys.readouterr().out
     assert output.startswith("\n")
-    assert "R3TRANSLATE 0.2.0" in output
+    assert "R3TRANSLATE 0.2.1" in output
     assert "GLOBAL OPTIONS" in output
     assert "--format text|json" in output
     assert output.endswith("\n\n")
@@ -66,7 +67,7 @@ def test_version_remains_a_single_line(capsys) -> None:
         main(["--version"])
     except SystemExit as exc:
         assert exc.code == 0
-    assert capsys.readouterr().out == "r3translate 0.2.0\n"
+    assert capsys.readouterr().out == "r3translate 0.2.1\n"
 
 
 def test_plan_directory_reports_prepared_character_budget(tmp_path: Path, capsys) -> None:
@@ -85,8 +86,8 @@ def test_plan_directory_reports_prepared_character_budget(tmp_path: Path, capsys
     assert [item["path"] for item in value["files"]] == ["a.md", "nested/b.md"]
     assert value["source_chars"] == sum(len(path.read_bytes().decode("utf-8")) for path in (source / "a.md", nested / "b.md"))
     assert value["protected_chars"] == len("`code`")
-    assert value["prepared_chars"] == value["deepl_request_chars"]
-    assert value["quota"]["remaining_after_plan"] == 100 - value["prepared_chars"]
+    assert value["prepared_chars"] > value["deepl_request_chars"]
+    assert value["quota"]["remaining_after_plan"] == 100 - value["deepl_request_chars"]
 
 
 def test_plan_over_budget_returns_findings(tmp_path: Path, capsys) -> None:
@@ -122,4 +123,26 @@ def test_provider_failure_uses_exit_3(tmp_path: Path, monkeypatch) -> None:
     document.write_text("Texto.\n", encoding="utf-8")
     monkeypatch.delenv("DEEPL_AUTH_KEY", raising=False)
     assert main(["translate", str(document), "--profile", str(profile(tmp_path)), "--provider", "deepl", "--output", str(tmp_path / "out.md")]) == 3
+
+
+def test_direct_translation_never_sends_protected_content(tmp_path: Path, monkeypatch) -> None:
+    document = tmp_path / "a.md"
+    document.write_text("Texto antes de `código` y https://example.com/a después.\n", encoding="utf-8")
+    output = tmp_path / "out.md"
+    seen: list[str] = []
+    monkeypatch.setenv("DEEPL_AUTH_KEY", "secret-for-test")
+
+    def translate(texts, *, source, target):
+        seen.extend(texts)
+        replacements = {
+            "Texto antes de ": "Text before of ",
+            " y ": " and ",
+            " después.": " after.",
+        }
+        return [replacements.get(value, value) for value in texts]
+
+    monkeypatch.setattr(cli_module, "translate_deepl", translate)
+    assert main(["translate", str(document), "--profile", str(profile(tmp_path)), "--provider", "deepl", "--output", str(output)]) == 0
+    assert all("[[R3P" not in value and "código" not in value and "https://example.com/a" not in value for value in seen)
+    assert output.read_text(encoding="utf-8") == "Text before of `código` and https://example.com/a after.\n"
 

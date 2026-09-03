@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from .profile import Profile
 
 
-TOKEN_TEMPLATE = "__R3P_{:04d}__"
+TOKEN_TEMPLATE = "[[R3P{:04d}R]]"
 WORD_RE = re.compile(r"[^\W\d_]{2,}", re.UNICODE)
+LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 FRONTMATTER_RE = re.compile(r"^([A-Za-z0-9_-]+)(\s*:\s*)(.*)$")
 
@@ -54,6 +55,9 @@ def _add(spans: list[tuple[int, int, str, str]], start: int, end: int, kind: str
 
 def _syntax_spans(text: str, profile: Profile) -> list[tuple[int, int, str, str]]:
     spans: list[tuple[int, int, str, str]] = []
+    if len(text) >= 2 and text[0] in {"'", '"'} and text[-1] == text[0]:
+        _add(spans, 0, 1, "frontmatter-quote")
+        _add(spans, len(text) - 1, len(text), "frontmatter-quote")
     patterns = [
         (r"`+[^`]*?`+", "inline-code"),
         (r"\$\$.*?\$\$|(?<!\\)\$(?!\s).*?(?<!\s)\$", "math"),
@@ -85,7 +89,7 @@ def _syntax_spans(text: str, profile: Profile) -> list[tuple[int, int, str, str]
     for match in re.finditer(r"[|]", text):
         _add(spans, match.start(), match.end(), "table-delimiter")
     for literal in sorted(profile.protected_literals, key=len, reverse=True):
-        for match in re.finditer(re.escape(literal), text):
+        for match in re.finditer(rf"(?<!\w){re.escape(literal)}(?!\w)", text):
             _add(spans, match.start(), match.end(), "profile-literal")
     for pattern in profile.protected_patterns:
         for match in re.finditer(pattern, text):
@@ -211,7 +215,7 @@ def segment_document(text: str, profile: Profile) -> tuple[Segment, ...]:
             offset += len(line_with_end)
             continue
         prepared, protections = _prepare(source, profile)
-        visible = re.sub(r"__R3P_\d{4}__", "", prepared)
+        visible = re.sub(r"(?:__R3P_\d{4}__|\[\[R3P\d{4}R\]\])", "", prepared)
         if not WORD_RE.search(visible):
             offset += len(line_with_end)
             continue
@@ -228,6 +232,32 @@ def restore_translation(value: str, protections: list[dict[str, str]]) -> str:
         if restored.count(token) != 1:
             raise ValueError(f"marker {token} is missing or duplicated")
         restored = restored.replace(token, item["replacement"])
-    if re.search(r"__R3P_\d{4}__", restored):
+    if re.search(r"(?:__R3P_\d{4}__|\[\[R3P\d{4}R\]\])", restored):
         raise ValueError("unknown protection marker remains")
     return restored
+
+
+def split_translation_fragments(value: str, protections: list[dict[str, str]]) -> tuple[list[str], list[int]]:
+    """Keep protected values local and return only linguistic provider fragments."""
+    tokens: list[str] = []
+    for item in protections:
+        token = item["token"]
+        if value.count(token) != 1:
+            raise ValueError(f"marker {token} is missing or duplicated")
+        tokens.append(token)
+    if not tokens:
+        return [value], [0] if LETTER_RE.search(value) else []
+    pattern = "(" + "|".join(re.escape(token) for token in sorted(tokens, key=len, reverse=True)) + ")"
+    token_set = set(tokens)
+    parts = re.split(pattern, value)
+    translatable = [index for index, part in enumerate(parts) if part not in token_set and LETTER_RE.search(part)]
+    return parts, translatable
+
+
+def rebuild_translation_fragments(parts: list[str], translatable: list[int], translations: list[str]) -> str:
+    if len(translatable) != len(translations):
+        raise ValueError("translated fragment count does not match the fragment plan")
+    rebuilt = list(parts)
+    for index, translation in zip(translatable, translations, strict=True):
+        rebuilt[index] = translation
+    return "".join(rebuilt)

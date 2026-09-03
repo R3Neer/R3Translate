@@ -1,9 +1,10 @@
 # R3Translate
 
 R3Translate translates Markdown without first rebuilding it. It identifies
-translatable source intervals, replaces code, links, identifiers and required
-terminology with opaque markers, and changes only those intervals when a
-verified bundle is applied.
+translatable source intervals and protects code, links, identifiers and required
+terminology. Direct provider translation sends only the linguistic fragments
+between protections; protected values and their markers remain local. A
+verified bundle changes only the identified source intervals.
 
 The profile is the translation contract:
 
@@ -55,10 +56,10 @@ through `.md` files in a stable order and ignore hidden directories such as
 r3translate plan notas --profile es-en.toml --quota 1000000
 ```
 
-It reports source characters, protected characters, and the prepared character
-count that would be sent to DeepL. Protection markers are included in that last
-count, making it a conservative request estimate. This mode is fully offline
-and needs no API key.
+It reports source, protected and prepared characters, plus the actual DeepL
+request character count. Protection markers are included in `prepared_chars`
+for diagnostic purposes, but excluded from the DeepL request because direct
+translation keeps them local. This mode is fully offline and needs no API key.
 
 To compare with the current DeepL account quota, request it explicitly:
 
@@ -73,13 +74,16 @@ finds review terms or exceeds the chosen budget exits with code `1`.
 ## DeepL
 
 ```console
-pipx install "r3translate[deepl] @ git+https://github.com/R3Neer/R3Translate.git@v0.2.0"
+pipx install "r3translate[deepl] @ git+https://github.com/R3Neer/R3Translate.git@v0.2.1"
 set DEEPL_AUTH_KEY=...
 r3translate translate document.md --profile es-en.toml --provider deepl --output document.en.md
 ```
 
-Only `translate --provider deepl` performs network traffic. The key is read
-only from `DEEPL_AUTH_KEY`; R3Translate does not create remote glossaries.
+Only `translate --provider deepl` performs network traffic. Protected Markdown,
+paths, links, identifiers and profile literals are never sent to DeepL; only
+the surrounding translatable fragments are submitted and recomposed locally.
+The key is read only from `DEEPL_AUTH_KEY`; R3Translate does not create remote
+glossaries.
 
 ## Exit codes
 
